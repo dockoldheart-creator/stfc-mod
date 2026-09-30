@@ -1991,6 +1991,7 @@ namespace json
 
       for (const auto& [key, section] : result.items()) {
         if (key == "battle_result_headers") {
+          spdlog::info("[BLTRACE] battle_result_headers key seen: entries={}", section.size());
           if (!sync_options.battlelogs) {
             continue;
           }
@@ -2134,8 +2135,16 @@ namespace rtc
 
 static void HandleEntityGroup(EntityGroup* entity_group)
 {
-  if (entity_group == nullptr || entity_group->Group == nullptr || entity_group->Group->bytes == nullptr
+  if (entity_group == nullptr) {
+    spdlog::info("[BLTRACE] HandleEntityGroup: null entity_group");
+    return;
+  }
+
+  spdlog::info("[BLTRACE] HandleEntityGroup entered: type={}", static_cast<int>(entity_group->Type_));
+
+  if (entity_group->Group == nullptr || entity_group->Group->bytes == nullptr
       || entity_group->Group->Length <= 0) {
+    spdlog::info("[BLTRACE] HandleEntityGroup: empty payload type={}", static_cast<int>(entity_group->Type_));
     return;
   }
 
@@ -2300,6 +2309,7 @@ static void HandleEntityGroup(EntityGroup* entity_group)
 
     // misc
     case EntityGroup::Type::Json:
+      spdlog::info("[BLTRACE] JSON EntityGroup seen: bytes={}", byteCount);
       submit_async(processors::json::parse);
       break;
 
@@ -2348,7 +2358,16 @@ static void* RtcParser_ParseFinalPayload(auto original, void* _this, CentrifugoI
 static void GameServerModelRegistry_ProcessResultInternal(auto original, void* _this, void* parsing_context,
                                                           ServiceResponse* service_response, MethodInfo* method)
 {
+  spdlog::info("[BLTRACE] ProcessResultInternal entered: response={}", static_cast<const void*>(service_response));
+
+  if (service_response == nullptr || service_response->EntityGroups == nullptr) {
+    spdlog::info("[BLTRACE] ProcessResultInternal: null response/entity groups");
+    return original(_this, parsing_context, service_response, method);
+  }
+
   auto* const entity_groups = service_response->EntityGroups;
+  spdlog::info("[BLTRACE] ProcessResultInternal entity-group count={}", entity_groups->Count);
+
   for (int i = 0; i < entity_groups->Count; ++i) {
     auto* const entity_group = entity_groups->get_Item(i);
     HandleEntityGroup(entity_group);
