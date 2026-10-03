@@ -1095,7 +1095,7 @@ namespace processors
 static void battle_result_headers(std::unique_ptr<std::string>&& bytes)
 {
   // TODO: Placeholder for future client support; currently unused by the game client.
-  spdlog::debug("process_battle_result_headers() was called");
+  spdlog::info("[BL219] BattleResultHeaders payload received: bytes={}", bytes ? bytes->size() : 0);
 }
 
 static void battle_report(std::unique_ptr<std::string>&& bytes)
