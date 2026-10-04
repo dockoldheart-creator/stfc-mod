@@ -1092,10 +1092,62 @@ static void ship_combat_log_data()
 namespace processors
 {
 
+static void enqueue_battle_ids(std::vector<uint64_t> battle_ids)
+{
+  std::vector<uint64_t> to_enqueue;
+  {
+    using trackers::previously_sent_battlelogs;
+    using trackers::previously_sent_battlelogs_mtx;
+
+    std::scoped_lock lk(previously_sent_battlelogs_mtx);
+
+    for (const auto id : battle_ids | std::views::reverse) {
+      if (eastl::find(previously_sent_battlelogs.begin(), previously_sent_battlelogs.end(), id)
+          == previously_sent_battlelogs.end()) {
+        previously_sent_battlelogs.push_back(id);
+        to_enqueue.push_back(id);
+      }
+    }
+  }
+
+  if (!to_enqueue.empty()) {
+    http::logging::debug("QUEUE", "battle headers",
+                         STR_FORMAT("Queuing {} battles for background processing", to_enqueue.size()));
+
+    {
+      std::scoped_lock lk(workers::combat_log_data_mtx);
+      for (const auto id : to_enqueue) {
+        workers::combat_log_data_queue.push(id);
+      }
+    }
+
+    trackers::save_previously_sent_logs();
+    workers::combat_log_data_cv.notify_all();
+  }
+}
+
 static void battle_result_headers(std::unique_ptr<std::string>&& bytes)
 {
-  // TODO: Placeholder for future client support; currently unused by the game client.
-  spdlog::info("[BL219] BattleResultHeaders payload received: bytes={}", bytes ? bytes->size() : 0);
+  if (auto response = Digit::PrimeServer::Models::BattleResultHeadersResponse(); response.ParseFromString(*bytes)) {
+    http::logging::trace("PROCESS", "battle headers",
+                         STR_FORMAT("Processing {} typed battle headers", response.headers_size()));
+
+    std::vector<uint64_t> battle_ids;
+    battle_ids.reserve(response.headers_size());
+
+    for (const auto& header : response.headers()) {
+      const auto id = header.id();
+      if (id > 0) {
+        battle_ids.push_back(static_cast<uint64_t>(id));
+      } else {
+        spdlog::warn("Ignoring invalid battle header id {}", id);
+      }
+    }
+
+    enqueue_battle_ids(std::move(battle_ids));
+  } else {
+    spdlog::error("Failed to parse BattleResultHeadersResponse");
+  }
 }
 
 static void battle_report(std::unique_ptr<std::string>&& bytes)
@@ -1845,40 +1897,10 @@ namespace json
     battle_ids.reserve(section.size());
 
     for (const auto& battle : section) {
-      const auto id = battle["id"].get<uint64_t>();
-      battle_ids.push_back(id);
+      battle_ids.push_back(battle["id"].get<uint64_t>());
     }
 
-    std::vector<uint64_t> to_enqueue;
-    {
-      using trackers::previously_sent_battlelogs;
-      using trackers::previously_sent_battlelogs_mtx;
-
-      std::scoped_lock lk(previously_sent_battlelogs_mtx);
-
-      for (const auto id : battle_ids | std::views::reverse) {
-        if (eastl::find(previously_sent_battlelogs.begin(), previously_sent_battlelogs.end(), id)
-            == previously_sent_battlelogs.end()) {
-          previously_sent_battlelogs.push_back(id);
-          to_enqueue.push_back(id);
-        }
-      }
-    }
-
-    if (!to_enqueue.empty()) {
-      http::logging::debug("QUEUE", "battle headers",
-                           STR_FORMAT("Queuing {} battles for background processing", to_enqueue.size()));
-
-      {
-        std::scoped_lock lk(workers::combat_log_data_mtx);
-        for (const auto id : to_enqueue) {
-          workers::combat_log_data_queue.push(id);
-        }
-      }
-
-      trackers::save_previously_sent_logs();
-      workers::combat_log_data_cv.notify_all();
-    }
+    processors::enqueue_battle_ids(std::move(battle_ids));
   }
 
   static void resources(const nlohmann::json& section)
