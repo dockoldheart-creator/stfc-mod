@@ -5372,3 +5372,14 @@ message WaveDefenseChallengeDataResponse {
 message ActiveWormholesResponse {
   repeated Wormhole wormholes = 1;
 }
+
+// Battle result header payload carried by EntityGroup::BattleResultHeaders.
+// Only fields required by the sync pipeline are declared; unknown protobuf
+// fields remain forward-compatible and are ignored by the parser.
+message JournalHeaderProto {
+  int64 id = 1;
+}
+
+message BattleResultHeadersResponse {
+  repeated JournalHeaderProto headers = 1;
+}
